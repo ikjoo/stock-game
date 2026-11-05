@@ -1,0 +1,5 @@
+game.db
+game.db-shm
+game.db-wal
+server.log
+supabase/.temp/

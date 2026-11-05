@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>가상 주식 투자 게임</title>
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --text:#1c2333; --muted:#6b7488; --line:#e3e7ef; --up:#e5383b; --down:#2f6fed; --accent:#2f6fed; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151c; --card:#1b1f2a; --text:#e8ebf2; --muted:#98a1b5; --line:#2b3140; --up:#ff6b6e; --down:#6aa0ff; --accent:#4c84ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:'Malgun Gothic',system-ui,sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; margin:8px 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .hidden { display:none; }
+  input[type=text], input[type=number] { padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font-size:15px; }
+  button { padding:10px 18px; border:0; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; color:#fff; background:var(--accent); }
+  button.buy { background:var(--up); } button.sell { background:var(--down); } button.end { background:#444b5e; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .stats { display:flex; gap:12px; flex-wrap:wrap; }
+  .stat { flex:1; min-width:140px; }
+  .stat small { color:var(--muted); display:block; }
+  .stat b { font-size:20px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:9px 8px; text-align:right; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  tbody tr.row { cursor:pointer; }
+  tbody tr.row:hover { background:var(--bg); }
+  tbody tr.sel { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .actions .sp { flex:1; }
+  .msg { min-height:20px; margin-top:8px; color:var(--muted); font-size:14px; }
+  .msg.err { color:var(--up); }
+  .medal { font-weight:700; }
+  @media (max-width:560px) { th, td { padding:8px 4px; font-size:13px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📈 가상 주식 투자 게임</h1>
+
+  <!-- 시작 화면 -->
+  <section id="start" class="card">
+    <p>10개 종목 · 시작 자금 1,000,000원 · 총 5턴. 모든 턴이 끝나면 전 종목이 자동 매도되고 순위가 저장됩니다.</p>
+    <input type="text" id="name" placeholder="플레이어 이름" maxlength="20">
+    <button id="startBtn">게임 시작</button>
+    <div id="startMsg" class="msg"></div>
+  </section>
+
+  <!-- 게임 화면 -->
+  <section id="game" class="hidden">
+    <div class="card stats">
+      <div class="stat"><small>플레이어</small><b id="sName"></b></div>
+      <div class="stat"><small>턴</small><b id="sTurn"></b></div>
+      <div class="stat"><small>보유 현금</small><b id="sCash"></b></div>
+      <div class="stat"><small>총 자산</small><b id="sTotal"></b></div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>종목</th><th>현재가</th><th>전 턴 대비</th><th>보유 수량</th><th>평가금액</th></tr></thead>
+        <tbody id="stockBody"></tbody>
+      </table>
+      <div class="actions">
+        <span id="selLabel" style="color:var(--muted)">종목을 선택하세요</span>
+        <input type="number" id="qty" min="1" value="1" style="width:90px">
+        <button class="buy" id="buyBtn">매수</button>
+        <button class="sell" id="sellBtn">매도</button>
+        <span class="sp"></span>
+        <button class="end" id="endBtn">턴 종료</button>
+      </div>
+      <div id="msg" class="msg"></div>
+    </div>
+  </section>
+
+  <div class="card hidden" id="chartCard">
+    <b>📊 시세 그래프</b> <small style="color:var(--muted)">(종목을 선택하면 강조됩니다)</small>
+    <svg id="chart" viewBox="0 0 800 320" style="width:100%;height:auto;margin-top:8px"></svg>
+    <div id="legend" style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px"></div>
+  </div>
+
+  <!-- 랭킹 -->
+  <section class="card">
+    <b>🏆 랭킹 (최종 금액 순)</b>
+    <table>
+      <thead><tr><th>순위</th><th>이름</th><th>최종 금액</th><th>손익</th><th>일시</th></tr></thead>
+      <tbody id="rankBody"></tbody>
+    </table>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const won = n => n.toLocaleString('ko-KR') + '원';
+let game = null, selected = null;
+
+async function call(method, url, body) {
+  const r = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || '오류');
+  return data;
+}
+function say(text, err) { $('msg').textContent = text; $('msg').className = 'msg' + (err ? ' err' : ''); }
+
+function render() {
+  $('sName').textContent = game.name;
+  $('sTurn').textContent = `${game.turn} / ${game.totalTurns}`;
+  $('sCash').textContent = won(game.cash);
+  $('sTotal').textContent = won(game.total);
+  $('stockBody').innerHTML = game.stocks.map(s => {
+    let diff = '-';
+    if (s.prev) {
+      const d = s.price - s.prev, p = (d / s.prev * 100).toFixed(1);
+      diff = `<span class="${d>0?'up':d<0?'down':''}">${d>0?'▲':d<0?'▼':''} ${Math.abs(d).toLocaleString()} (${p}%)</span>`;
+    }
+    return `<tr class="row ${s.id===selected?'sel':''}" data-id="${s.id}">
+      <td>${s.name}</td><td>${won(s.price)}</td><td>${diff}</td><td>${s.qty}주</td><td>${won(s.price*s.qty)}</td></tr>`;
+  }).join('');
+  const s = game.stocks.find(s => s.id === selected);
+  $('selLabel').textContent = s ? `선택: ${s.name}` : '종목을 선택하세요';
+  $('endBtn').textContent = game.turn === game.totalTurns ? '최종 턴 종료' : '턴 종료';
+  drawChart();
+}
+
+const COLORS = ['#e6194b','#3cb44b','#f58231','#4363d8','#911eb4','#0aa5a5','#c9a800','#f032e6','#7a5230','#6b7488'];
+function drawChart() {
+  const W = 800, H = 320, L = 60, R = 20, T = 15, B = 30, N = game.totalTurns;
+  const all = game.stocks.flatMap(s => s.history);
+  let lo = Math.min(...all, 5000), hi = Math.max(...all, 5000);
+  const pad = Math.max((hi - lo) * 0.1, 200); lo = Math.max(0, lo - pad); hi += pad;
+  const x = t => L + (W - L - R) * (N === 1 ? 0 : (t) / (N - 1));
+  const y = p => T + (H - T - B) * (1 - (p - lo) / (hi - lo));
+  let out = '';
+  for (let i = 0; i <= 4; i++) {
+    const p = lo + (hi - lo) * i / 4;
+    out += `<line x1="${L}" x2="${W-R}" y1="${y(p)}" y2="${y(p)}" stroke="var(--line)"/>` +
+      `<text x="${L-6}" y="${y(p)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${Math.round(p).toLocaleString()}</text>`;
+  }
+  for (let t = 0; t < N; t++)
+    out += `<text x="${x(t)}" y="${H-8}" text-anchor="middle" font-size="12" fill="var(--muted)">${t+1}턴</text>`;
+  out += `<line x1="${L}" x2="${W-R}" y1="${y(5000)}" y2="${y(5000)}" stroke="var(--muted)" stroke-dasharray="4 4"/>`;
+  const order = game.stocks.slice().sort((a, b) => (a.id === selected) - (b.id === selected));
+  for (const s of order) {
+    const c = COLORS[s.id - 1], on = !selected || s.id === selected;
+    const pts = s.history.map((p, t) => `${x(t)},${y(p)}`);
+    out += `<g opacity="${on ? 1 : 0.18}"><polyline points="${pts.join(' ')}" fill="none" stroke="${c}" stroke-width="${s.id === selected ? 3.5 : 2}"/>` +
+      s.history.map((p, t) => `<circle cx="${x(t)}" cy="${y(p)}" r="${s.id === selected ? 5 : 3.5}" fill="${c}"><title>${s.name} ${t+1}턴: ${p.toLocaleString()}원</title></circle>`).join('') + '</g>';
+  }
+  $('chart').innerHTML = out;
+  $('legend').innerHTML = game.stocks.map(s =>
+    `<span style="opacity:${!selected || s.id === selected ? 1 : .45}"><span style="color:${COLORS[s.id-1]}">●</span> ${s.name}</span>`).join('');
+  $('chartCard').classList.remove('hidden');
+}
+
+async function loadRank() {
+  const list = await call('GET', '/api/rankings');
+  const medal = ['🥇','🥈','🥉'];
+  $('rankBody').innerHTML = list.length ? list.map(r => `<tr>
+    <td class="medal">${medal[r.rank-1] || r.rank}</td><td>${r.name.replace(/[<>&]/g,'')}</td>
+    <td>${won(r.final_money)}</td><td class="${r.profit>0?'up':r.profit<0?'down':''}">${r.profit>0?'+':''}${r.profit.toLocaleString()}원</td>
+    <td>${r.created_at}</td></tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">아직 기록이 없습니다</td></tr>';
+}
+
+$('startBtn').onclick = async () => {
+  try {
+    game = await call('POST', '/api/start', { name: $('name').value });
+    selected = null;
+    $('start').classList.add('hidden'); $('game').classList.remove('hidden');
+    say(''); render();
+  } catch (e) { $('startMsg').textContent = e.message; $('startMsg').className = 'msg err'; }
+};
+$('stockBody').onclick = e => {
+  const tr = e.target.closest('tr.row'); if (!tr) return;
+  selected = Number(tr.dataset.id); render();
+};
+
+async function trade(kind) {
+  if (!selected) return say('먼저 종목을 선택하세요.', true);
+  try {
+    game = await call('POST', '/api/' + kind, { gameId: game.id, stockId: selected, qty: $('qty').value });
+    render(); say(kind === 'buy' ? '매수 완료' : '매도 완료');
+  } catch (e) { say(e.message, true); }
+}
+$('buyBtn').onclick = () => trade('buy');
+$('sellBtn').onclick = () => trade('sell');
+
+$('endBtn').onclick = async () => {
+  if (!game.traded && !confirm('이번 턴에 매수/매도를 하지 않았습니다.\n정말 턴을 종료하시겠습니까?')) return;
+  try {
+    const res = await call('POST', '/api/end-turn', { gameId: game.id });
+    game = res;
+    if (res.finished) {
+      alert(`게임 종료!\n보유 주식을 모두 매도했습니다.\n최종 금액: ${won(res.finalMoney)}\n(손익 ${(res.finalMoney-res.startMoney).toLocaleString()}원)\n랭킹에 저장되었습니다.`);
+      $('game').classList.add('hidden'); $('chartCard').classList.add('hidden'); $('start').classList.remove('hidden');
+      $('name').value = ''; $('startMsg').textContent = '';
+      await loadRank();
+    } else { render(); say(`${game.turn}턴이 시작되었습니다. 시세가 변동되었습니다.`); }
+  } catch (e) { say(e.message, true); }
+};
+
+loadRank();
+</script>
+</body>
+</html>
