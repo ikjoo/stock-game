@@ -1,0 +1,39 @@
+:root { --bg:#f4f6fa; --card:#fff; --text:#1c2333; --muted:#6b7488; --line:#e3e7ef; --up:#e5383b; --down:#2f6fed; --accent:#2f6fed; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#12151c; --card:#1b1f2a; --text:#e8ebf2; --muted:#98a1b5; --line:#2b3140; --up:#ff6b6e; --down:#6aa0ff; --accent:#4c84ff; }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:'Malgun Gothic',system-ui,sans-serif; }
+.wrap { max-width:860px; margin:0 auto; padding:16px; }
+h1 { font-size:22px; margin:8px 0 16px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+.hidden { display:none; }
+.muted { color:var(--muted); }
+input[type=text], input[type=number] { padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font-size:15px; }
+input#qty { width:90px; }
+button { padding:10px 18px; border:0; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; color:#fff; background:var(--accent); }
+button.buy { background:var(--up); }
+button.sell { background:var(--down); }
+button.end { background:#444b5e; }
+button:disabled { opacity:.45; cursor:not-allowed; }
+.stats { display:flex; gap:12px; flex-wrap:wrap; }
+.stat { flex:1; min-width:140px; }
+.stat small { color:var(--muted); display:block; }
+.stat b { font-size:20px; }
+table { width:100%; border-collapse:collapse; }
+th, td { padding:9px 8px; text-align:right; border-bottom:1px solid var(--line); }
+th:first-child, td:first-child { text-align:left; }
+tbody tr.row { cursor:pointer; }
+tbody tr.row:hover { background:var(--bg); }
+tbody tr.sel { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+td.empty { text-align:center; color:var(--muted); }
+.up { color:var(--up); }
+.down { color:var(--down); }
+.actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+.actions .sp { flex:1; }
+.msg { min-height:20px; margin-top:8px; color:var(--muted); font-size:14px; }
+.msg.err { color:var(--up); }
+.medal { font-weight:700; }
+#chart { width:100%; height:auto; margin-top:8px; }
+#legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13px; }
+@media (max-width:560px) { th, td { padding:8px 4px; font-size:13px; } }
