@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { PUBLIC_DIR } = require('./config');
 const game = require('./game');
+const ai = require('./ai');
 const { HttpError } = require('./errors');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css' };
@@ -16,6 +17,7 @@ const postRoutes = {
   '/api/buy': game.buy,
   '/api/sell': game.sell,
   '/api/end-turn': game.endTurn,
+  '/api/ai/recommend': ai.recommend, // async: 상태를 바꾸지 않는 추천만 반환
 };
 
 function sendJson(res, status, body) {
@@ -77,7 +79,7 @@ async function handle(req, res) {
     if (serveStatic(res, pathname)) return;
   } else if (req.method === 'POST' && postRoutes[pathname]) {
     requireJson(req);
-    return sendJson(res, 200, postRoutes[pathname](await readJson(req)));
+    return sendJson(res, 200, await postRoutes[pathname](await readJson(req)));
   }
   sendJson(res, 404, { error: '찾을 수 없습니다.' });
 }
