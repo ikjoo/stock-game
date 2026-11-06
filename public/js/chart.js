@@ -7,8 +7,10 @@ const W = 800, H = 320, L = 60, R = 20, T = 15, B = 30;
 export function drawChart(game, selected) {
   const N = game.totalTurns;
   const prices = game.stocks.flatMap(s => s.history);
-  let lo = Math.min(...prices, game.startPrice);
-  let hi = Math.max(...prices, game.startPrice);
+  // 서버가 startPrice를 주지 않는 백엔드(Supabase)도 있으므로 1턴 가격(=시작가)로 대체한다.
+  const base = game.startPrice ?? game.stocks[0].history[0];
+  let lo = Math.min(...prices, base);
+  let hi = Math.max(...prices, base);
   const pad = Math.max((hi - lo) * 0.1, 200);
   lo = Math.max(0, lo - pad);
   hi += pad;
@@ -25,7 +27,7 @@ export function drawChart(game, selected) {
   for (let t = 0; t < N; t++) {
     svg += `<text x="${x(t)}" y="${H - 8}" text-anchor="middle" font-size="12" fill="var(--muted)">${t + 1}턴</text>`;
   }
-  svg += `<line x1="${L}" x2="${W - R}" y1="${y(game.startPrice)}" y2="${y(game.startPrice)}" stroke="var(--muted)" stroke-dasharray="4 4"/>`;
+  svg += `<line x1="${L}" x2="${W - R}" y1="${y(base)}" y2="${y(base)}" stroke="var(--muted)" stroke-dasharray="4 4"/>`;
 
   // 선택된 종목이 맨 위에 그려지도록 정렬
   const ordered = game.stocks.slice().sort((a, b) => (a.id === selected) - (b.id === selected));
