@@ -41,7 +41,7 @@ function view(gameId) {
   const stockValue = stocks.reduce((sum, s) => sum + s.price * s.qty, 0);
   return {
     id: g.id, name: g.name, turn: g.turn, totalTurns: TOTAL_TURNS, cash: g.cash,
-    traded: !!g.traded, status: g.status, stocks, stockValue, total: g.cash + stockValue,
+    traded: !!g.traded, aiUsed: !!get('SELECT 1 AS x FROM ai_uses WHERE game_id=? AND turn=?', gameId, g.turn), status: g.status, stocks, stockValue, total: g.cash + stockValue,
     startMoney: START_MONEY, startPrice: START_PRICE,
   };
 }

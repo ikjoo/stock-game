@@ -107,22 +107,46 @@ function renderAi(note) {
   box.innerHTML = html;
 }
 
-function resetAi() {
-  recommendation = null;
-  renderAi();
+// AI 추천은 턴마다 한 번만 쓸 수 있다. 서버(aiUsed)가 막고, 새로고침해도 받은 추천을 다시 볼 수 있도록
+// 사용 여부와 추천 내용을 브라우저에도 보관한다 (서버가 aiUsed를 주지 않는 운영 백엔드 대비).
+const aiKey = () => `stockGame.ai.${game.id}.${game.turn}`;
+const aiStore = {
+  get() { try { return JSON.parse(localStorage.getItem(aiKey())) || {}; } catch { return {}; } },
+  set(v) { try { localStorage.setItem(aiKey(), JSON.stringify(v)); } catch { /* 저장 불가 환경은 무시 */ } },
+};
+const aiUsed = () => !!(game.aiUsed || aiStore.get().used);
+
+/** 현재 턴 기준으로 AI 카드(버튼 상태, 보관된 추천)를 다시 그린다. */
+function syncAi() {
+  const saved = aiStore.get();
+  recommendation = saved.rec || null;
+  const used = aiUsed();
+  $('aiBtn').disabled = used;
+  $('aiBtn').textContent = used ? '이번 턴 AI 추천 사용 완료' : 'AI 추천 받기 (턴당 1회)';
+  renderAi(used && !recommendation ? '이번 턴에는 AI 추천을 이미 사용했습니다. 다음 턴에 다시 받을 수 있습니다.' : '');
 }
 
 async function askAi() {
+  if (aiUsed()) return syncAi();
+  const { id, turn } = game; // 요청 중 턴이 바뀌면 이전 턴 기준 결과는 버린다
   $('aiBtn').disabled = true;
   recommendation = null;
-  renderAi('AI가 분석 중입니다…');
+  renderAi(`${turn}턴 현재 금액·보유 종목·가격 추이를 분석 중입니다…`);
   try {
-    recommendation = await api('POST', '/api/ai/recommend', { gameId: game.id });
-    renderAi();
+    const rec = await api('POST', '/api/ai/recommend', { gameId: id });
+    if (game.id !== id || game.turn !== turn) return;
+    game.aiUsed = true;
+    aiStore.set({ used: true, rec });
+    syncAi();
   } catch (e) {
+    if (game.id !== id || game.turn !== turn) return;
+    if (e.status === 409) { // 서버 기준으로 이미 사용한 턴
+      game.aiUsed = true;
+      aiStore.set({ used: true, rec: null });
+      return syncAi();
+    }
+    $('aiBtn').disabled = false; // 실패는 사용으로 치지 않는다
     renderAi(e.message);
-  } finally {
-    $('aiBtn').disabled = false;
   }
 }
 
@@ -142,7 +166,9 @@ async function applyAi() {
     say(`추천 실행 중 오류 (${done.length}건 실행됨): ${e.message}`, true);
   } finally {
     $('aiApplyBtn').disabled = false;
-    resetAi();
+    // 실행(또는 시도)한 추천은 가격·보유가 바뀌어 더 이상 유효하지 않으므로 보관본을 지운다.
+    aiStore.set({ used: true, rec: null });
+    syncAi();
   }
 }
 
@@ -150,7 +176,7 @@ function showGameScreen() {
   $('start').classList.add('hidden');
   $('game').classList.remove('hidden');
   $('aiCard').classList.remove('hidden');
-  resetAi();
+  syncAi();
   say('');
   renderGame();
 }
@@ -214,7 +240,7 @@ async function endTurn() {
       showStartScreen();
       await loadRankings();
     } else {
-      resetAi(); // 이전 턴 가격 기준 추천은 더 이상 유효하지 않다
+      syncAi(); // 새 턴은 AI 추천을 다시 한 번 쓸 수 있다
       renderGame();
       say(`${game.turn}턴이 시작되었습니다. 시세가 변동되었습니다.`);    }
   } catch (e) {

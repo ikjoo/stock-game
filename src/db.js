@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS prices (
   price INTEGER NOT NULL,
   PRIMARY KEY (game_id, stock_id, turn)
 );
+-- AI 추천은 게임·턴마다 한 번만 쓸 수 있다. 성공한 추천만 기록한다.
+CREATE TABLE IF NOT EXISTS ai_uses (
+  game_id INTEGER NOT NULL,
+  turn INTEGER NOT NULL,
+  PRIMARY KEY (game_id, turn)
+);
 CREATE TABLE IF NOT EXISTS rankings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   game_id INTEGER NOT NULL UNIQUE,
