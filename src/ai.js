@@ -1,102 +1,10 @@
-// AI 매매 추천. OpenRouter에 현재 게임 상태를 보내고, 응답을 검증해 실행 가능한 주문만 돌려준다.
+// AI 매매 추천 (로컬 서버용): DB에서 게임 상태를 읽어 ai-core에 넘긴다.
 const cfg = require('./config');
 const game = require('./game');
-const { HttpError } = require('./errors');
+const { requestRecommendation } = require('./ai-core');
 
-const MAX_ACTIONS = 6;
-
-function buildPrompt(v) {
-  const rows = v.stocks.map(s =>
-    `id=${s.id} ${s.name}: 현재가 ${s.price}원, 보유 ${s.qty}주, 시세추이(1턴~현재) [${s.history.join(', ')}]`).join('\n');
-  return [
-    `가상 주식 게임의 ${v.turn}/${v.totalTurns}턴입니다. 보유 현금 ${v.cash}원.`,
-    '규칙: 마지막 턴이 끝나면 보유 주식이 전량 현재가로 매도되어 최종 금액으로 순위가 정해집니다.',
-    '매 턴 각 종목 가격은 -20%~+25% 범위에서 무작위로 변하며(과거 추세와 무관), 가격은 100원 이상입니다.',
-    '현금이 부족하거나 보유 수량보다 많이 매도할 수 없습니다.',
-    '',
-    rows,
-    '',
-    '이 상황에서 이번 턴에 할 매수/매도 주문을 추천하세요. 반드시 아래 JSON 형식으로만 답하세요.',
-    '{"summary":"한 줄 요약(한국어)","actions":[{"action":"buy"|"sell","stockId":숫자,"qty":양의정수,"reason":"짧은 이유(한국어)"}]}',
-    `주문은 최대 ${MAX_ACTIONS}개이고, 거래하지 않는 편이 낫다면 actions를 빈 배열로 두세요.`,
-  ].join('\n');
-}
-
-function parseJson(text) {
-  const cleaned = String(text || '').replace(/```(?:json)?/gi, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start < 0 || end < start) throw new Error('no json');
-  return JSON.parse(cleaned.slice(start, end + 1));
-}
-
-/** AI가 낸 주문을 실제 상태에 맞춰 검증한다. 불가능한 주문은 버리고 수량은 가능한 만큼으로 줄인다. */
-function sanitize(v, raw) {
-  let cash = v.cash;
-  const held = Object.fromEntries(v.stocks.map(s => [s.id, s.qty]));
-  const byId = Object.fromEntries(v.stocks.map(s => [s.id, s]));
-  const list = Array.isArray(raw && raw.actions) ? raw.actions : [];
-  // 매도를 먼저 실행해야 그 대금으로 매수할 수 있다.
-  const ordered = list.slice(0, MAX_ACTIONS * 2).filter(a => a && typeof a === 'object')
-    .sort((a, b) => (b.action === 'sell') - (a.action === 'sell'));
-  const actions = [];
-  for (const a of ordered) {
-    const s = byId[Number(a.stockId)];
-    let qty = Math.floor(Number(a.qty));
-    if (!s || !(qty > 0) || (a.action !== 'buy' && a.action !== 'sell')) continue;
-    if (a.action === 'sell') {
-      qty = Math.min(qty, held[s.id]);
-      if (qty <= 0) continue;
-      held[s.id] -= qty;
-      cash += qty * s.price;
-    } else {
-      qty = Math.min(qty, Math.floor(cash / s.price));
-      if (qty <= 0) continue;
-      held[s.id] += qty;
-      cash -= qty * s.price;
-    }
-    actions.push({
-      action: a.action, stockId: s.id, stockName: s.name, qty, price: s.price,
-      reason: String(a.reason || '').slice(0, 120),
-    });
-    if (actions.length >= MAX_ACTIONS) break;
-  }
-  return { summary: String((raw && raw.summary) || '').slice(0, 200), actions };
-}
-
-async function recommend({ gameId }) {
-  if (!cfg.OPENROUTER_API_KEY) throw new HttpError(503, 'AI 추천이 설정되지 않았습니다. 서버에 OPENROUTER_API_KEY가 필요합니다.');
-  const v = game.view(Number(gameId));
-  if (v.status !== 'playing') throw new HttpError(400, '이미 종료된 게임입니다.');
-
-  let res;
-  try {
-    res = await fetch(`${cfg.OPENROUTER_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${cfg.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: cfg.OPENROUTER_MODEL,
-        temperature: 0.4,
-        messages: [
-          { role: 'system', content: '당신은 가상 주식 게임의 투자 조언가입니다. 요청된 JSON만 출력합니다.' },
-          { role: 'user', content: buildPrompt(v) },
-        ],
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch {
-    throw new HttpError(502, 'AI 서버에 연결하지 못했습니다. 잠시 후 다시 시도하세요.');
-  }
-  if (!res.ok) throw new HttpError(502, `AI 서버 오류 (${res.status})`);
-
-  let raw;
-  try {
-    const body = await res.json();
-    raw = parseJson(body.choices[0].message.content);
-  } catch {
-    throw new HttpError(502, 'AI 응답을 해석하지 못했습니다. 다시 시도하세요.');
-  }
-  return sanitize(v, raw);
-}
+const recommend = ({ gameId }) => requestRecommendation(game.view(Number(gameId)), {
+  apiKey: cfg.OPENROUTER_API_KEY, model: cfg.OPENROUTER_MODEL, baseUrl: cfg.OPENROUTER_BASE_URL,
+});
 
 module.exports = { recommend };
