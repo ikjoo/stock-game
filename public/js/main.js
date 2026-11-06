@@ -27,6 +27,30 @@ function diffCell(s) {
   return `<span class="${trendClass(d)}">${arrow} ${Math.abs(d).toLocaleString()} (${pct}%)</span>`;
 }
 
+/**
+ * 입력 가능한 수량의 상한을 정한다.
+ * 보유 수량이 없어 매도할 수 없으면 현재 현금으로 살 수 있는 최대 수량까지만 입력할 수 있다.
+ * 보유 중이면 매수·매도 모두 가능하므로 둘 중 큰 값이 상한이다.
+ */
+function maxQty(s) {
+  const buyable = Math.floor(game.cash / s.price);
+  return s.qty > 0 ? Math.max(s.qty, buyable) : buyable;
+}
+
+function limitQty(sel) {
+  const input = $('qty');
+  if (!sel) { input.removeAttribute('max'); input.disabled = false; $('buyBtn').disabled = $('sellBtn').disabled = false; return; }
+  const max = maxQty(sel);
+  input.disabled = $('buyBtn').disabled = $('sellBtn').disabled = max < 1;
+  input.max = String(Math.max(max, 1));
+  input.title = max < 1 ? '매수할 현금이 없고 보유 수량도 없습니다' : `최대 ${max}주`;
+  if (max < 1) { input.value = ''; return; }
+  const n = Number(input.value);
+  if (!(n >= 1)) input.value = '1';
+  else if (n > max) input.value = String(max);
+  $('selLabel').textContent += ` (최대 ${max}주)`;
+}
+
 function renderGame() {
   $('sName').textContent = game.name;
   $('sTurn').textContent = `${game.turn} / ${game.totalTurns}`;
@@ -38,6 +62,7 @@ function renderGame() {
     </tr>`).join('');
   const sel = game.stocks.find(s => s.id === selected);
   $('selLabel').textContent = sel ? `선택: ${sel.name}` : '종목을 선택하세요';
+  limitQty(sel);
   $('endBtn').textContent = game.turn === game.totalTurns ? '최종 턴 종료' : '턴 종료';
   drawChart(game, selected);
 }
@@ -193,6 +218,13 @@ $('sellBtn').onclick = () => trade('sell');
 $('endBtn').onclick = endTurn;
 $('aiBtn').onclick = askAi;
 $('aiApplyBtn').onclick = applyAi;
+// 직접 입력하거나 스피너로 올려도 상한을 넘기지 못하게 한다.
+$('qty').oninput = () => {
+  const sel = game && game.stocks.find(s => s.id === selected);
+  if (!sel) return;
+  const max = maxQty(sel);
+  if (Number($('qty').value) > max) $('qty').value = String(max);
+};
 $('stockBody').onclick = e => {
   const tr = e.target.closest('tr.row');
   if (!tr) return;
