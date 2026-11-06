@@ -4,6 +4,14 @@ import { drawChart, hideChart } from './chart.js';
 let game = null;      // 서버가 내려준 최신 게임 상태 (view)
 let selected = null;  // 선택된 종목 id
 
+// 새로고침해도 진행 중인 게임을 이어서 할 수 있도록 게임 id만 브라우저에 저장한다.
+const STORAGE_KEY = 'stockGame.gameId';
+const storage = {
+  get() { try { return localStorage.getItem(STORAGE_KEY); } catch { return null; } },
+  set(id) { try { localStorage.setItem(STORAGE_KEY, String(id)); } catch { /* 저장 불가 환경은 무시 */ } },
+  clear() { try { localStorage.removeItem(STORAGE_KEY); } catch { /* 무시 */ } },
+};
+
 // ---------- 렌더링 ----------
 
 function say(text, isError = false) {
@@ -47,6 +55,28 @@ async function loadRankings() {
     : '<tr><td colspan="5" class="empty">아직 기록이 없습니다</td></tr>';
 }
 
+function showGameScreen() {
+  $('start').classList.add('hidden');
+  $('game').classList.remove('hidden');
+  say('');
+  renderGame();
+}
+
+/** 저장된 게임이 아직 진행 중이면 복원한다. */
+async function restoreGame() {
+  const id = storage.get();
+  if (!id) return;
+  try {
+    const saved = await api('GET', `/api/game/${encodeURIComponent(id)}`);
+    if (saved.status !== 'playing') return storage.clear();
+    game = saved;
+    selected = null;
+    showGameScreen();
+  } catch {
+    storage.clear();
+  }
+}
+
 function showStartScreen() {
   $('game').classList.add('hidden');
   hideChart();
@@ -61,10 +91,8 @@ async function startGame() {
   try {
     game = await api('POST', '/api/start', { name: $('name').value });
     selected = null;
-    $('start').classList.add('hidden');
-    $('game').classList.remove('hidden');
-    say('');
-    renderGame();
+    storage.set(game.id);
+    showGameScreen();
   } catch (e) {
     $('startMsg').textContent = e.message;
     $('startMsg').className = 'msg err';
@@ -87,6 +115,7 @@ async function endTurn() {
   try {
     game = await api('POST', '/api/end-turn', { gameId: game.id });
     if (game.finished) {
+      storage.clear();
       alert(`게임 종료!\n보유 주식을 모두 매도했습니다.\n최종 금액: ${won(game.finalMoney)}\n(손익 ${(game.finalMoney - game.startMoney).toLocaleString()}원)\n랭킹에 저장되었습니다.`);
       showStartScreen();
       await loadRankings();
@@ -111,3 +140,4 @@ $('stockBody').onclick = e => {
 };
 
 loadRankings();
+restoreGame();

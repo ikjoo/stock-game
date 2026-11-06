@@ -7,9 +7,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const PORT = 34567;
-const BASE = `http://127.0.0.1:${PORT}`;
-let proc, tmp;
+const net = require('node:net');
+
+let PORT, BASE, proc, tmp;
+
+// 운영체제가 비어 있는 포트를 골라 주도록 해서 포트 충돌을 피한다.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once('error', reject);
+    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
+  });
+}
 
 async function call(method, url, body) {
   const r = await fetch(BASE + url, {
@@ -22,6 +31,8 @@ const post = (u, b) => call('POST', u, b);
 const start = async (name = '테스터') => (await post('/api/start', { name })).body;
 
 before(async () => {
+  PORT = await freePort();
+  BASE = `http://127.0.0.1:${PORT}`;
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stockgame-'));
   proc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(tmp, 'test.db') },
@@ -187,4 +198,63 @@ test('정적 파일: 메인 페이지 제공, 경로 탈출 차단', async () =>
   const esc = await fetch(BASE + '/..%2fserver.js');
   assert.notEqual(esc.status, 200);
   assert.equal((await fetch(BASE + '/nope.html')).status, 404);
+});
+
+// ---------- 요청 검증 (이슈 #3, #4, #5, #6) ----------
+
+const raw = (url, { method = 'POST', type = 'application/json', body } = {}) =>
+  fetch(BASE + url, { method, headers: type ? { 'Content-Type': type } : {}, body }).then(async r => ({ status: r.status, body: await r.json() }));
+
+test('잘못된 JSON / null / 배열 본문은 500이 아니라 400', async () => {
+  for (const body of ['{not json', 'null', '[]', '"text"', '123']) {
+    const r = await raw('/api/start', { body });
+    assert.equal(r.status, 400, `본문 ${body}`);
+    assert.match(r.body.error, /잘못된 요청/);
+  }
+});
+
+test('빈 본문은 400 (이름 누락)', async () => {
+  assert.equal((await raw('/api/start', { body: '' })).status, 400);
+});
+
+test('본문이 10KB를 넘으면 413', async () => {
+  const r = await raw('/api/start', { body: JSON.stringify({ name: 'a'.repeat(20_000) }) });
+  assert.equal(r.status, 413);
+});
+
+test('한글 문자 중간(바이트 경계)에서 본문이 쪼개져 와도 깨지지 않음', async () => {
+  const name = '가나다라마바';
+  const bytes = Buffer.from(JSON.stringify({ name }), 'utf8');
+  const cut = bytes.indexOf(Buffer.from('나')) + 1; // '나'(3바이트)의 첫 바이트 뒤에서 분할
+  const body = await new Promise((resolve, reject) => {
+    const req = require('node:http').request(BASE + '/api/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': bytes.length },
+    }, res => {
+      let out = '';
+      res.on('data', c => { out += c; });
+      res.on('end', () => resolve(JSON.parse(out)));
+    });
+    req.on('error', reject);
+    req.write(bytes.subarray(0, cut));
+    setTimeout(() => req.end(bytes.subarray(cut)), 50); // 별도 청크로 전송
+  });
+  assert.equal(body.name, name);
+});
+
+test('Content-Type이 application/json이 아니면 415', async () => {
+  for (const type of ['text/plain', 'application/x-www-form-urlencoded', null]) {
+    const r = await raw('/api/start', { type, body: JSON.stringify({ name: 'x' }) });
+    assert.equal(r.status, 415, `type ${type}`);
+  }
+  // charset 파라미터가 붙어도 허용
+  assert.equal((await raw('/api/start', { type: 'application/json; charset=utf-8', body: JSON.stringify({ name: 'ok' }) })).status, 200);
+});
+
+test('정적 파일: 인코딩된 경로 탈출과 잘못된 인코딩 차단', async () => {
+  for (const p of ['/..%2fserver.js', '/%2e%2e/server.js', '/..%5cserver.js', '/%E0%A4%A']) {
+    const r = await fetch(BASE + p);
+    assert.equal(r.status, 404, p);
+  }
+  assert.equal((await fetch(BASE + '/js/main.js')).status, 200);
+  assert.equal((await fetch(BASE + '/style.css')).status, 200);
 });

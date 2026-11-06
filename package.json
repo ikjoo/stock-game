@@ -1,0 +1,14 @@
+{
+  "name": "stock-game",
+  "version": "1.0.0",
+  "description": "가상 주식 투자 게임 (Node 내장 SQLite, 외부 의존성 없음)",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
