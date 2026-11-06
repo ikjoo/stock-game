@@ -88,16 +88,17 @@ test('불가능한 주문은 걸러지고 수량은 가능한 만큼으로 줄�
     summary: 's',
     actions: [
       { action: 'sell', stockId: 1, qty: 3, reason: '보유 없음' },          // 보유 0 → 제외
-      { action: 'buy', stockId: 1, qty: 999999, reason: '과다' },            // 200주로 축소
+      { action: 'buy', stockId: 1, qty: 999999, reason: '과다' },            // 비중 상한(35%)으로 70주로 축소
       { action: 'buy', stockId: 99, qty: 1, reason: '없는 종목' },           // 제외
       { action: 'hold', stockId: 1, qty: 1, reason: '' },                    // 제외
-      { action: 'buy', stockId: 2, qty: 1.5, reason: '소수' },               // 1주 (현금 없음 → 제외)
+      { action: 'buy', stockId: 2, qty: 1.5, reason: '소수' },               // 내림하여 1주
     ],
   }) + '\n```';
   const r = await post(base, '/api/ai/recommend', { gameId: g.id });
   assert.equal(r.status, 200);
-  assert.equal(r.body.actions.length, 1);
-  assert.equal(r.body.actions[0].qty, 200);
+  assert.equal(r.body.actions.length, 2);
+  assert.equal(r.body.actions[0].qty, 70); // 비중 상한 35%
+  assert.equal(r.body.actions[1].qty, 1);  // 1.5 → 내림
 });
 
 test('추천 주문을 그대로 실행하면 서버가 모두 받아들인다 (매도 먼저)', async () => {
@@ -143,4 +144,29 @@ test('키가 없으면 503', async () => {
   const g = (await post(noKey, '/api/start', { name: 'x' })).body;
   const r = await post(noKey, '/api/ai/recommend', { gameId: g.id });
   assert.equal(r.status, 503);
+});
+
+test('한 종목 집중 매수는 총 자산의 35%로 제한되고, 현금 전후가 계산된다', async () => {
+  const g = await newGame();
+  fakeReply = JSON.stringify({ summary: 's', actions: [
+    { action: 'buy', stockId: 1, qty: 200, reason: '몰빵' },
+    { action: 'buy', stockId: 1, qty: 50, reason: '추가(상한 초과)' },
+    { action: 'buy', stockId: 2, qty: 40, reason: '분산' },
+  ] });
+  const r = await post(base, '/api/ai/recommend', { gameId: g.id });
+  assert.deepEqual(r.body.actions.map(a => [a.stockId, a.qty]), [[1, 70], [2, 40]]);
+  assert.equal(r.body.cashBefore, 1_000_000);
+  assert.equal(r.body.cashAfter, 1_000_000 - 110 * 5000);
+});
+
+test('프롬프트: 현재 금액·분산 지침 포함, 종목 순서는 매번 섞인다', async () => {
+  const g = await newGame();
+  fakeReply = JSON.stringify({ summary: '', actions: [] });
+  fakeRequests = [];
+  for (let i = 0; i < 6; i++) await post(base, '/api/ai/recommend', { gameId: g.id });
+  const prompts = fakeRequests.map(q => q.body.messages[1].content);
+  assert.match(prompts[0], /총 자산 1000000원/);
+  assert.match(prompts[0], /분산/);
+  const firstStock = p => p.match(/- (\S+)\(id=/)[1];
+  assert.ok(new Set(prompts.map(firstStock)).size > 1, '첫 줄 종목이 항상 같으면 편향 가능');
 });

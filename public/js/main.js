@@ -64,11 +64,22 @@ function renderAi(note) {
   $('aiApplyBtn').classList.toggle('hidden', !(recommendation && recommendation.actions.length));
   if (note) { box.textContent = note; return; }
   if (!recommendation) { box.textContent = ''; return; }
-  const { summary, actions } = recommendation;
-  box.innerHTML = `<p>${escapeHtml(summary)}</p>` + (actions.length
-    ? `<ul>${actions.map(a => `<li><b class="${a.action === 'buy' ? 'up' : 'down'}">${a.action === 'buy' ? '매수' : '매도'}</b>
-        ${escapeHtml(a.stockName)} ${a.qty}주 <small class="muted">(${won(a.price)}/주)</small> — ${escapeHtml(a.reason)}</li>`).join('')}</ul>`
-    : '<p class="muted">이번 턴은 거래하지 않는 것을 추천합니다.</p>');
+  const { summary, actions, cashBefore, cashAfter } = recommendation;
+  const line = a => `<li>${escapeHtml(a.stockName)} ${a.qty}주 <small class="muted">(${won(a.price)}/주 · ${won(a.price * a.qty)})</small> — ${escapeHtml(a.reason)}</li>`;
+  const sells = actions.filter(a => a.action === 'sell');
+  const buys = actions.filter(a => a.action === 'buy');
+  const proceeds = sells.reduce((sum, a) => sum + a.price * a.qty, 0);
+  const spent = buys.reduce((sum, a) => sum + a.price * a.qty, 0);
+  let html = `<p>${escapeHtml(summary)}</p>`;
+  if (!actions.length) {
+    html += '<p class="muted">이번 턴은 거래하지 않는 것을 추천합니다.</p>';
+  } else {
+    html += `<ol class="flow"><li><b>현재 현금</b> ${won(cashBefore)}</li>`;
+    if (sells.length) html += `<li><b class="down">① 매도</b> → +${won(proceeds)} 확보<ul>${sells.map(line).join('')}</ul></li>`;
+    if (buys.length) html += `<li><b class="up">${sells.length ? '②' : '①'} 매수</b> → -${won(spent)} 사용<ul>${buys.map(line).join('')}</ul></li>`;
+    html += `<li><b>실행 후 현금</b> ${won(cashAfter)}</li></ol>`;
+  }
+  box.innerHTML = html;
 }
 
 function resetAi() {
@@ -180,8 +191,7 @@ async function endTurn() {
     } else {
       resetAi(); // 이전 턴 가격 기준 추천은 더 이상 유효하지 않다
       renderGame();
-      say(`${game.turn}턴이 시작되었습니다. 시세가 변동되었습니다.`);
-    }
+      say(`${game.turn}턴이 시작되었습니다. 시세가 변동되었습니다.`);    }
   } catch (e) {
     say(e.message, true);
   }
