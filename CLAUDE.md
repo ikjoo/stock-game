@@ -20,6 +20,7 @@ Backend (`server.js` is only the entry point), layered so each file only depends
 - `src/config.js`: env (`PORT`, `DB_PATH`) and all game constants (`START_MONEY`, `START_PRICE`, `TOTAL_TURNS`, price-change range, the `STOCKS` list).
 - `src/db.js`: SQLite connection, schema creation, `all/get/run` helpers and `tx()` (`BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`).
 - `src/game.js`: all game rules (`startGame`, `buy`, `sell`, `endTurn`, `rankings`, `view`). It knows nothing about HTTP; validation failures throw `HttpError(status, message)` from `src/errors.js` with Korean messages shown directly in the UI.
+- `src/ai.js`: AI 매매 추천. OpenRouter(`OPENROUTER_API_KEY`, 선택 `OPENROUTER_MODEL`/`OPENROUTER_BASE_URL`; `.env`에서 읽음, git 제외)를 서버에서만 호출하고, 응답은 `sanitize()`로 현금/보유량에 맞게 검증한다. `POST /api/ai/recommend`는 상태를 바꾸지 않으며, 클라이언트가 추천을 기존 buy/sell API로 실행한다. 테스트는 `test/ai.test.js`(가짜 OpenRouter 서버 사용).
 - `src/app.js`: HTTP only: route table, JSON body parsing, error to status mapping, static file serving from `public/`. POST requests must use `Content-Type: application/json` (415 otherwise), bodies are capped at 10KB (413), and malformed JSON or non-object bodies return 400.
 
 Frontend (`public/`, native ES modules, no build step): `index.html` + `style.css`, with `js/main.js` (state, rendering, events), `js/chart.js` (hand-built inline SVG chart), `js/util.js` (DOM/format/fetch helpers, `escapeHtml`).

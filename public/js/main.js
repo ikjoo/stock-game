@@ -55,9 +55,66 @@ async function loadRankings() {
     : '<tr><td colspan="5" class="empty">아직 기록이 없습니다</td></tr>';
 }
 
+// ---------- AI 추천 ----------
+
+let recommendation = null; // { summary, actions } — 현재 턴에서 받은 추천
+
+function renderAi(note) {
+  const box = $('aiBox');
+  $('aiApplyBtn').classList.toggle('hidden', !(recommendation && recommendation.actions.length));
+  if (note) { box.textContent = note; return; }
+  if (!recommendation) { box.textContent = ''; return; }
+  const { summary, actions } = recommendation;
+  box.innerHTML = `<p>${escapeHtml(summary)}</p>` + (actions.length
+    ? `<ul>${actions.map(a => `<li><b class="${a.action === 'buy' ? 'up' : 'down'}">${a.action === 'buy' ? '매수' : '매도'}</b>
+        ${escapeHtml(a.stockName)} ${a.qty}주 <small class="muted">(${won(a.price)}/주)</small> — ${escapeHtml(a.reason)}</li>`).join('')}</ul>`
+    : '<p class="muted">이번 턴은 거래하지 않는 것을 추천합니다.</p>');
+}
+
+function resetAi() {
+  recommendation = null;
+  renderAi();
+}
+
+async function askAi() {
+  $('aiBtn').disabled = true;
+  recommendation = null;
+  renderAi('AI가 분석 중입니다…');
+  try {
+    recommendation = await api('POST', '/api/ai/recommend', { gameId: game.id });
+    renderAi();
+  } catch (e) {
+    renderAi(e.message);
+  } finally {
+    $('aiBtn').disabled = false;
+  }
+}
+
+async function applyAi() {
+  if (!recommendation) return;
+  $('aiApplyBtn').disabled = true;
+  const done = [];
+  try {
+    for (const a of recommendation.actions) {
+      game = await api('POST', '/api/' + a.action, { gameId: game.id, stockId: a.stockId, qty: a.qty });
+      done.push(a);
+    }
+    renderGame();
+    say(`AI 추천 ${done.length}건을 실행했습니다.`);
+  } catch (e) {
+    renderGame();
+    say(`추천 실행 중 오류 (${done.length}건 실행됨): ${e.message}`, true);
+  } finally {
+    $('aiApplyBtn').disabled = false;
+    resetAi();
+  }
+}
+
 function showGameScreen() {
   $('start').classList.add('hidden');
   $('game').classList.remove('hidden');
+  $('aiCard').classList.remove('hidden');
+  resetAi();
   say('');
   renderGame();
 }
@@ -79,6 +136,7 @@ async function restoreGame() {
 
 function showStartScreen() {
   $('game').classList.add('hidden');
+  $('aiCard').classList.add('hidden');
   hideChart();
   $('start').classList.remove('hidden');
   $('name').value = '';
@@ -120,6 +178,7 @@ async function endTurn() {
       showStartScreen();
       await loadRankings();
     } else {
+      resetAi(); // 이전 턴 가격 기준 추천은 더 이상 유효하지 않다
       renderGame();
       say(`${game.turn}턴이 시작되었습니다. 시세가 변동되었습니다.`);
     }
@@ -132,6 +191,8 @@ $('startBtn').onclick = startGame;
 $('buyBtn').onclick = () => trade('buy');
 $('sellBtn').onclick = () => trade('sell');
 $('endBtn').onclick = endTurn;
+$('aiBtn').onclick = askAi;
+$('aiApplyBtn').onclick = applyAi;
 $('stockBody').onclick = e => {
   const tr = e.target.closest('tr.row');
   if (!tr) return;

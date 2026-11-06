@@ -37,3 +37,7 @@ td.empty { text-align:center; color:var(--muted); }
 #chart { width:100%; height:auto; margin-top:8px; }
 #legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13px; }
 @media (max-width:560px) { th, td { padding:8px 4px; font-size:13px; } }
+
+.ai-box { margin-top:10px; font-size:14px; }
+.ai-box ul { margin:6px 0 0; padding-left:20px; }
+.ai-box li { margin:4px 0; }
