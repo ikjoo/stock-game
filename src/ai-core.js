@@ -22,6 +22,16 @@ function buildPrompt(v) {
     `- ${s.name}(id=${s.id}): 현재가 ${s.price}원, 전 턴 대비 ${s.prev ? pct(s.price, s.prev) : '없음'}, ` +
     `시작가 대비 ${pct(s.price, s.history[0])}, 보유 ${s.qty}주(평가 ${s.price * s.qty}원), 시세추이 [${s.history.join(', ')}]`).join('\n');
   const last = v.turn === v.totalTurns;
+  const minPrice = Math.min(...v.stocks.map(s => s.price));
+  const held = v.stocks.some(s => s.qty > 0);
+  let cashNote = '';
+  if (v.cash < minPrice) {
+    cashNote = held
+      ? '현재 현금으로는 어떤 종목도 살 수 없습니다. 그래도 추천을 포기하지 말고, 보유 종목의 현재가와 이전 가격 추이를 분석해 ' +
+        '① 팔아야 할 종목(많이 올라 이익 실현할 종목, 하락세가 이어지는 종목, 한 종목 비중이 큰 경우)과 ' +
+        '② 그 매도 대금으로 새로 살 종목을 함께 추천하세요. 매도만 추천해도 됩니다.'
+      : '현금도 보유 주식도 없어 거래할 수 없습니다. actions는 빈 배열로 두고 summary에 그 이유를 적으세요.';
+  }
   return [
     `가상 주식 게임의 ${v.turn}/${v.totalTurns}턴이 시작되었습니다.`,
     `현재 보유 현금 ${v.cash}원, 보유 주식 평가금액 ${stockValue}원, 총 자산 ${v.cash + stockValue}원.`,
@@ -31,6 +41,7 @@ function buildPrompt(v) {
     '',
     rows,
     '',
+    cashNote,
     '이번 턴에 할 매도와 매수를 한 번에 계획하세요. 먼저 매도로 현금을 확보하고, 그 현금과 기존 현금으로 매수하는 순서입니다.',
     '지침: 특정 종목에 몰아서 투자하지 말고 서로 다른 3~5개 종목에 분산하세요(한 종목은 총 자산의 35%를 넘길 수 없습니다).',
     '직전 턴 대비 크게 오른 종목은 이익 실현을, 떨어진 종목은 보유 여부와 분산을 고려해 판단하고, 각 주문의 이유에 현재 상황을 근거로 적으세요.',

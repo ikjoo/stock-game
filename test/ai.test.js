@@ -163,10 +163,71 @@ test('프롬프트: 현재 금액·분산 지침 포함, 종목 순서는 매번
   const g = await newGame();
   fakeReply = JSON.stringify({ summary: '', actions: [] });
   fakeRequests = [];
-  for (let i = 0; i < 6; i++) await post(base, '/api/ai/recommend', { gameId: g.id });
+  for (let i = 0; i < 6; i++) await post(base, '/api/ai/recommend', { gameId: (await newGame()).id }); // 턴당 1회 제한이 있어 게임마다 한 번씩
   const prompts = fakeRequests.map(q => q.body.messages[1].content);
   assert.match(prompts[0], /총 자산 1000000원/);
   assert.match(prompts[0], /분산/);
   const firstStock = p => p.match(/- (\S+)\(id=/)[1];
   assert.ok(new Set(prompts.map(firstStock)).size > 1, '첫 줄 종목이 항상 같으면 편향 가능');
+});
+
+test('AI 추천은 턴당 한 번만: 두 번째는 409, 다음 턴에는 다시 가능', async () => {
+  const g = await newGame();
+  fakeReply = JSON.stringify({ summary: 's', actions: [] });
+  fakeRequests = [];
+  assert.equal(g.aiUsed, false);
+  assert.equal((await post(base, '/api/ai/recommend', { gameId: g.id })).status, 200);
+  const again = await post(base, '/api/ai/recommend', { gameId: g.id });
+  assert.equal(again.status, 409);
+  assert.match(again.body.error, /이미 사용/);
+  assert.equal(fakeRequests.length, 1, '두 번째 요청은 AI를 호출하지 않는다');
+  assert.equal((await (await fetch(`${base}/api/game/${g.id}`)).json()).aiUsed, true);
+  const next = (await post(base, '/api/end-turn', { gameId: g.id })).body;
+  assert.equal(next.aiUsed, false);
+  assert.equal((await post(base, '/api/ai/recommend', { gameId: g.id })).status, 200);
+});
+
+test('실패한 추천은 사용 횟수를 소모하지 않는다', async () => {
+  const g = await newGame();
+  fakeReply = 500;
+  assert.equal((await post(base, '/api/ai/recommend', { gameId: g.id })).status, 502);
+  fakeReply = '횡설수설';
+  assert.equal((await post(base, '/api/ai/recommend', { gameId: g.id })).status, 502);
+  fakeReply = JSON.stringify({ summary: 's', actions: [] });
+  assert.equal((await post(base, '/api/ai/recommend', { gameId: g.id })).status, 200);
+});
+
+test('동시에 두 번 요청해도 AI는 한 번만 호출된다', async () => {
+  const g = await newGame();
+  fakeReply = JSON.stringify({ summary: 's', actions: [] });
+  fakeRequests = [];
+  const [a, b] = await Promise.all([post(base, '/api/ai/recommend', { gameId: g.id }), post(base, '/api/ai/recommend', { gameId: g.id })]);
+  assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+  assert.equal(fakeRequests.length, 1);
+});
+
+test('현금이 없어도 보유 종목을 매도하고 그 대금으로 매수하는 추천이 나온다', async () => {
+  const g = await newGame();
+  await post(base, '/api/buy', { gameId: g.id, stockId: 1, qty: 200 }); // 현금 0, 삼성전자 200주
+  fakeRequests = [];
+  fakeReply = JSON.stringify({ summary: '갈아타기', actions: [
+    { action: 'buy', stockId: 2, qty: 50, reason: '매도 대금으로 매수' },
+    { action: 'sell', stockId: 1, qty: 100, reason: '비중 축소' },
+  ] });
+  const r = await post(base, '/api/ai/recommend', { gameId: g.id });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.actions.map(a => [a.action, a.stockId, a.qty]), [['sell', 1, 100], ['buy', 2, 50]]);
+  assert.equal(r.body.cashBefore, 0);
+  assert.equal(r.body.cashAfter, 500000 - 250000);
+  const prompt = fakeRequests[0].body.messages[1].content;
+  assert.match(prompt, /어떤 종목도 살 수 없습니다/);
+  assert.match(prompt, /매도 대금으로 새로 살 종목/);
+});
+
+test('현금도 보유도 없으면 거래 불가 안내를 프롬프트에 담는다', async () => {
+  // 1턴에 전량 매수 후 전량 매도하면 보유 0, 현금은 그대로이므로 별도 시나리오: 현금 0 + 보유 0은 만들 수 없어 순수 함수로 확인
+  const { buildPrompt } = require('../src/ai-core');
+  const v = { turn: 2, totalTurns: 5, cash: 0, status: 'playing',
+    stocks: [{ id: 1, name: 'A', price: 5000, prev: 5000, history: [5000, 5000], qty: 0 }] };
+  assert.match(buildPrompt(v), /현금도 보유 주식도 없어/);
 });
